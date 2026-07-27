@@ -5,8 +5,17 @@ independent from any other bot you're running) that lets a section build
 up a shared library of resources per subject, entirely inside Discord —
 no website, no login, no admin panel to host.
 
-- `/resource-add subject title link` — **anyone** can submit a resource.
-  It doesn't go live immediately.
+- `/resource-add subject title` — **anyone** can submit a resource, with
+  a **link, an attached file, or both** (at least one required). Files
+  aren't downloaded or re-hosted anywhere — the bot just remembers a
+  Discord message link pointing straight at it, so it never goes stale
+  the way raw Discord CDN file URLs eventually do.
+- `/resource-remove` (mods only) — autocomplete lists every resource for
+  a subject (pending, approved, or rejected — labeled so you can tell
+  which), picks it by ID under the hood so there's no ambiguity between
+  similarly-named entries. Also cleans up the associated Discord message
+  (the approved post, or the review message if it was never approved) on
+  a best-effort basis.
 - Every submission gets posted to a review channel with **✅ Approve /
   ❌ Reject** buttons.
 - Only people with the configured mod role (or "Manage Server" permission

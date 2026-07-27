@@ -126,14 +126,17 @@ function displaySubject(subject) {
   return m ? `${m[1]} ${m[2]}` : compact;
 }
 
-export async function addResource({ subject, title, link, submittedBy }) {
+export async function addResource({ subject, title, link, hasFile, submittedBy }) {
   const store = await readStore();
   const entry = {
     id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     subject: displaySubject(subject),
     subjectKey: normalizeSubject(subject),
     title: title.trim(),
-    link: link.trim(),
+    link: link ? link.trim() : null,
+    hasFile: Boolean(hasFile),
+    reviewRef: null, // { guildId, channelId, messageId } — where the submission (and file, if any) first landed
+    postedRef: null, // { guildId, channelId, messageId } — the resource's permanent home once approved
     submittedBy,
     status: 'pending',
     createdAt: new Date().toISOString(),
@@ -159,10 +162,43 @@ export async function setResourceStatus(id, status, reviewedBy) {
   return entry;
 }
 
+export async function setReviewRef(id, guildId, channelId, messageId) {
+  const store = await readStore();
+  const entry = store.resources.find((r) => r.id === id);
+  if (!entry) return null;
+  entry.reviewRef = { guildId, channelId, messageId };
+  await writeStore(store);
+  return entry;
+}
+
+export async function setPostedRef(id, guildId, channelId, messageId) {
+  const store = await readStore();
+  const entry = store.resources.find((r) => r.id === id);
+  if (!entry) return null;
+  entry.postedRef = { guildId, channelId, messageId };
+  await writeStore(store);
+  return entry;
+}
+
+export async function removeResource(id) {
+  const store = await readStore();
+  const idx = store.resources.findIndex((r) => r.id === id);
+  if (idx === -1) return null;
+  const [removed] = store.resources.splice(idx, 1);
+  await writeStore(store);
+  return removed;
+}
+
 export async function getApprovedBySubject(subject) {
   const store = await readStore();
   const key = normalizeSubject(subject);
   return store.resources.filter((r) => r.status === 'approved' && r.subjectKey === key);
+}
+
+export async function getAllBySubject(subject) {
+  const store = await readStore();
+  const key = normalizeSubject(subject);
+  return store.resources.filter((r) => r.subjectKey === key);
 }
 
 export async function getKnownSubjects() {
