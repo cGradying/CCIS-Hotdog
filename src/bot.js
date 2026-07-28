@@ -42,7 +42,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName('resource-add')
     .setDescription('Submit a resource for a subject (goes to mod review first)')
-    .addStringOption((o) => o.setName('subject').setDescription('Subject code, e.g. COMP 001').setRequired(true))
+    .addStringOption((o) => o.setName('subject').setDescription('Subject code, e.g. COMP 001').setRequired(true).setAutocomplete(true))
     .addStringOption((o) => o.setName('title').setDescription('What is this? e.g. "Midterm Reviewer"').setRequired(true))
     .addStringOption((o) => o.setName('link').setDescription('A link (optional if attaching a file instead)').setRequired(false))
     .addAttachmentOption((o) => o.setName('file').setDescription('Attach a file instead of (or with) a link').setRequired(false)),
@@ -162,7 +162,7 @@ export async function createBot() {
 
       if (
         focused.name === 'subject' &&
-        ['resources', 'subject-channel-set', 'resource-remove'].includes(interaction.commandName)
+        ['resources', 'resource-add', 'subject-channel-set', 'resource-remove'].includes(interaction.commandName)
       ) {
         const subjects = await getKnownSubjects();
         const matches = subjects
