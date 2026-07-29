@@ -1,144 +1,149 @@
 # Resource/FAQ Bot
 
-A separate Discord bot (own app, own token, own repo/host — fully
-independent from any other bot you're running) that lets a section build
-up a shared library of resources per subject, entirely inside Discord —
-no website, no login, no admin panel to host.
+Discord bot backing a per-subject resource library with a moderated submission
+queue. Entirely slash-command driven — no web UI, no admin panel.
 
-- `/resource-add subject title` — **anyone** can submit a resource, with
-  a **link, an attached file, or both** (at least one required). Files
-  aren't downloaded or re-hosted anywhere — the bot just remembers a
-  Discord message link pointing straight at it, so it never goes stale
-  the way raw Discord CDN file URLs eventually do.
-- `/resource-remove` (mods only) — autocomplete lists every resource for
-  a subject (pending, approved, or rejected — labeled so you can tell
-  which), picks it by ID under the hood so there's no ambiguity between
-  similarly-named entries. Also cleans up the associated Discord message
-  (the approved post, or the review message if it was never approved) on
-  a best-effort basis.
-- Every submission gets posted to a review channel with **✅ Approve /
-  ❌ Reject** buttons.
-- Only people with the configured mod role (or "Manage Server" permission
-  if you don't set one) can click those buttons.
-- Once approved, `/resources <subject>` shows it to everyone — with
-  autocomplete on subject codes, built automatically from whatever's
-  already been approved (no need to hand-maintain a subject list).
-- Optional second field, `/resources <subject> search:<text>` — narrows
-  results by title instead of listing everything, with its own
-  autocomplete scoped to whatever subject you already picked (typing
-  "wa" suggests "Wake protocol notes" but not "Woke movement essay").
-- `/resource-pending` (mods only) lists what's waiting on review, in case
-  the review channel history gets buried.
-- Once approved, the resource **also auto-posts** into that subject's own
-  channel or thread — if you've mapped one. Mods set/change the mapping
-  anytime with `/subject-channel-set subject:"COMP 001" channel:#comp-001`
-  (works for regular channels *and* threads — e.g. forum posts). Add a new
-  thread later and just re-run the command to point at it, no redeploy.
-  `/subject-channel-list` shows all current mappings. Posts use a
-  Minecraft-ocean-biome-styled embed (blocky blue/teal banner) to stand
-  apart from regular chat.
+Node >= 18, ESM (`"type": "module"`). Separate Discord application, token and
+data store from any other bot.
 
-Subject codes are normalized under the hood — `COMP 001`, `comp001`, and
-`  Geed    004 ` all resolve to the same entry (`COMP 001` / `GEED 004`),
-so people don't fragment the index by typing it slightly differently.
+## Stack
 
-## Use cases
+| Concern | Package |
+|---|---|
+| Discord gateway, slash commands, components | `discord.js` ^14 |
+| Optional persistence | `mongodb` |
+| GitHub-backed persistence | `fetch` (built-in), no dependency |
 
-- Section-wide subject resource library (reviewers, PDFs, past exams) without
-  scattering links across a dozen chat threads.
-- Lightweight FAQ/knowledge base per subject, moderated so submissions stay
-  on-topic and spam-free.
-- Replacement for a shared Drive folder when you also want approval, search,
-  and auto-posting into the right subject channel.
-
-## 1. Create the bot (separate application from any other bot)
-
-Same steps as any Discord bot:
-1. discord.com/developers/applications → **New Application**
-2. **Bot** tab → Reset Token → copy it → this is `DISCORD_TOKEN`
-3. **OAuth2 → URL Generator**: scopes `bot` + `applications.commands`;
-   permissions `Send Messages`, `Embed Links`, `Use Slash Commands`
-4. Invite it to your server with the generated URL
-
-## 2. Set up the review channel + mod role
-
-1. Create (or pick) a channel for submissions to land in for review —
-   copy its ID (Developer Mode on, right-click → Copy Channel ID) →
-   `REVIEW_CHANNEL_ID`
-2. Optional: pick a role that's allowed to approve/reject — copy its ID →
-   `MOD_ROLE_ID`. If you skip this, anyone with "Manage Server" can
-   approve instead.
-
-## 3. Configure
+## Architecture
 
 ```
-cp .env.example .env
+src/index.js   bare /health HTTP listener + boots the client
+src/bot.js     one interactionCreate handler: commands, autocomplete, buttons
+src/config.js  env → config object
+src/store.js   persistence, backend chosen at runtime
 ```
-Fill in `DISCORD_TOKEN`, `REVIEW_CHANNEL_ID`, `MOD_ROLE_ID`.
 
-## 4. Run locally first
+Command handling is deliberately single-file. Slash commands, autocomplete
+responses and approve/reject button routing all live in one
+`interactionCreate` handler in `bot.js`.
+
+`index.js` adds only a `/health` listener so hosts that require an open port
+do not idle the process out.
+
+### Storage backends
+
+Priority order, first match wins:
+
+1. **GitHub as a database** — `GITHUB_TOKEN` + `GITHUB_DATA_REPO` set.
+   Commits the JSON file through the contents API, re-fetching the blob SHA
+   immediately before each write. Yields a full audit history via `git log`.
+2. **MongoDB** — `MONGODB_URI` set. Database name `resource_faq_bot`.
+3. **Local file** — `data/resources.json`.
+
+Every mutation reads the whole store, mutates in memory, and writes it back.
+There is no partial-update path; keep new mutations in that shape.
+
+### Data model
+
+```jsonc
+{
+  "resources": [ /* … */ ],
+  "subjectChannels": { "<subjectKey>": "<channelId>" }
+}
+```
+
+`normalizeStoreShape` still upgrades the older bare-array format on read.
+
+**Subject codes are normalized twice.** `normalizeSubject` strips all
+whitespace and uppercases to produce the lookup key (`subjectKey`);
+`displaySubject` produces the canonical `"COMP 001"` shown to users. Always
+match on `subjectKey`, never the display string. `COMP 001`, `comp001` and
+`  Geed    004 ` therefore resolve to one entry.
+
+**Resources carry two message refs:**
+
+| Ref | Points at |
+|---|---|
+| `reviewRef` | The submission message in the review channel, and its attachment |
+| `postedRef` | The permanent post after approval |
+
+Attached files are never re-hosted. A fresh attachment URL is pulled from the
+review message at approval time and users are handed a message link, because
+raw Discord CDN URLs expire.
+
+Button custom IDs are `res_review:<approve|reject>:<resourceId>`. The
+`resource-remove` autocomplete returns the resource **id** as its value so
+similarly-titled entries stay unambiguous.
+
+Permission checks route through `isModerator()`: `MOD_ROLE_ID` when
+configured, otherwise the `ManageGuild` permission.
+
+## Discord application setup
+
+1. <https://discord.com/developers/applications> → **New Application**.
+   This must be its own application, not one shared with another bot.
+2. **Bot** → **Reset Token** → `DISCORD_TOKEN`.
+3. **OAuth2 → URL Generator** → scopes `bot`, `applications.commands`;
+   permissions `Send Messages`, `Embed Links`, `Use Slash Commands`.
+4. Enable Developer Mode, then copy the review channel's ID →
+   `REVIEW_CHANNEL_ID`.
+5. Optional: copy the moderator role ID → `MOD_ROLE_ID`. Blank falls back to
+   `ManageGuild`.
+
+## Configuration
+
+`cp .env.example .env`
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DISCORD_TOKEN` | yes | |
+| `REVIEW_CHANNEL_ID` | yes | Where submissions land for approval |
+| `MOD_ROLE_ID` | no | Blank → anyone with Manage Server |
+| `GITHUB_TOKEN` | no | Classic token, `repo` scope. Enables GitHub backend |
+| `GITHUB_DATA_REPO` | no | `owner/repo`. Use a **separate** repo from the code |
+| `GITHUB_DATA_BRANCH` | no | Default `main` |
+| `GITHUB_DATA_PATH` | no | Default `resources.json`; created on first write |
+| `MONGODB_URI` | no | Used only when `GITHUB_TOKEN` is blank |
+
+`config.js` reads all env vars into one exported object. `assertConfig()`
+warns on missing values rather than exiting.
+
+Point `GITHUB_DATA_REPO` at a repo that does not deploy this bot — otherwise
+every submission pushes a commit and can trigger a redeploy loop.
+
+## Run
 
 ```
 npm install
-npm start
-```
-Try `/resource-add` in your server, then approve it from the review
-channel, then confirm `/resources <subject>` shows it.
-
-## 5. Point subjects at their channels/threads (optional but recommended)
-
-If your subjects live as threads under a forum channel (or as separate
-text channels), map each one so approvals auto-post there instead of only
-being pullable via `/resources`:
-
-```
-/subject-channel-set subject:"COMP 001" channel:#comp-001-thread
+npm start          # node src/index.js
 ```
 
-You can set this up before any resources exist for a subject, and change
-it anytime — e.g. archived a thread and made a new one? Just re-run the
-command pointing at the new one. `/subject-channel-list` shows everything
-currently mapped.
+Expect `[bot] logged in as…` and `[web] health listener up on…`.
 
-## 6. Persistent storage
+Slash commands are re-registered globally on every `ready` via
+`REST.put(Routes.applicationCommands(...))`, so command changes take effect on
+restart with no separate deploy script.
 
-Same situation as any bot on a free host with no disk (Render free tier,
-etc.) — data resets on every restart/redeploy unless you point it at
-somewhere external. Two options, pick one:
+## Slash commands
 
-### Option A — GitHub as the database (recommended if you're already on GitHub)
+| Command | Access | Behavior |
+|---|---|---|
+| `/resource-add subject title [link] [file]` | anyone | Submit a resource. At least one of `link`/`file` required. Posts to the review queue with Approve/Reject buttons |
+| `/resources subject [search]` | anyone | List approved resources. `subject` autocompletes from approved entries; `search` narrows by title, scoped to the chosen subject |
+| `/resource-remove subject title` | mods | Delete by resource id. Autocomplete lists pending, approved and rejected, labeled. Best-effort cleanup of the associated Discord message |
+| `/resource-pending` | mods | List submissions awaiting review |
+| `/subject-channel-set subject channel` | mods | Map a subject to a channel **or thread** for auto-posting on approval |
+| `/subject-channel-list` | mods | Dump all current mappings |
 
-The bot can read/write a JSON file in a repo via the GitHub API — no
-separate database service needed.
+Subject autocomplete is derived from approved resources at query time — there
+is no subject list to maintain.
 
-1. **Create a small, separate repo** just for this data — e.g.
-   `resource-bot-data` — **not** the bot's own code repo. This matters:
-   if it were the same repo Render deploys from, every resource
-   submission would push a commit and could trigger a full redeploy.
-2. github.com/settings/tokens → **Generate new token (classic)** → check
-   the `repo` scope → generate → copy it.
-3. Set in `.env`:
-   ```
-   GITHUB_TOKEN=<the token>
-   GITHUB_DATA_REPO=yourname/resource-bot-data
-   GITHUB_DATA_BRANCH=main
-   GITHUB_DATA_PATH=resources.json
-   ```
-   The file doesn't need to exist beforehand — the bot creates it on the
-   first submission.
-4. Bonus: since it's just commits to a repo, you get a full history of
-   every change for free — `git log` on that repo shows every add/approve/
-   reject over time.
+A mapped subject re-posts approved resources into its channel/thread using a
+distinct embed style. Mappings can be set before any resource exists for that
+subject and re-pointed at any time (e.g. after archiving a forum thread) with
+no redeploy.
 
-### Option B — MongoDB Atlas free tier
-
-Same free Atlas setup as the schedule bot (see that project's README) —
-you can reuse the same cluster, this bot just stores its data under its
-own database name inside it, so there's no collision. Only used if
-`GITHUB_TOKEN` above is left blank.
-
-Leave both blank if you're deploying to a host with a real disk (a VM,
-Oracle Cloud) — local JSON files work fine there.
+Log prefixes: `[bot]`, `[web]`, `[config]`.
 
 ---
 
@@ -146,6 +151,6 @@ Oracle Cloud) — local JSON files work fine there.
 
 **Author:** [cGradying](https://github.com/cGradying)
 
-![astra cosmic](https://img.shields.io/badge/cGradying-astra%20cosmic-F97316?style=for-the-badge&labelColor=0B1120)
+![astra](https://img.shields.io/badge/cGradying-astra-10B981?style=for-the-badge&labelColor=0B1120)
 
 </div>
