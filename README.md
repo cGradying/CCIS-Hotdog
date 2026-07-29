@@ -42,6 +42,15 @@ Subject codes are normalized under the hood — `COMP 001`, `comp001`, and
 `  Geed    004 ` all resolve to the same entry (`COMP 001` / `GEED 004`),
 so people don't fragment the index by typing it slightly differently.
 
+## Use cases
+
+- Section-wide subject resource library (reviewers, PDFs, past exams) without
+  scattering links across a dozen chat threads.
+- Lightweight FAQ/knowledge base per subject, moderated so submissions stay
+  on-topic and spam-free.
+- Replacement for a shared Drive folder when you also want approval, search,
+  and auto-posting into the right subject channel.
+
 ## 1. Create the bot (separate application from any other bot)
 
 Same steps as any Discord bot:
@@ -165,8 +174,19 @@ monitor itself ever has a gap, which is rare but not impossible.
 
 ### If you ever get access to a card
 
-A real VM (Oracle Cloud's Always Free tier, for example) removes the
-keep-alive dependency entirely — no port, no sleep, no monitor needed,
+A real VM (Oracle Cloud's Always Free tier, or GCP's `e2-micro` Always Free
+instance as a backup if Oracle's identity check gives you trouble) removes
+the keep-alive dependency entirely — no port, no sleep, no monitor needed,
 it just runs. Worth switching to eventually if that becomes an option,
 but it's not required — the Render setup above is a legitimate long-term
 home for this bot as-is.
+
+---
+
+<div align="center">
+
+**Author:** [cGradying](https://github.com/cGradying)
+
+![astra cosmic](https://img.shields.io/badge/cGradying-astra%20cosmic-F97316?style=for-the-badge&labelColor=0B1120)
+
+</div>
