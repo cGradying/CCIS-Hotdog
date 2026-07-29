@@ -140,57 +140,6 @@ own database name inside it, so there's no collision. Only used if
 Leave both blank if you're deploying to a host with a real disk (a VM,
 Oracle Cloud) — local JSON files work fine there.
 
-## 7. Deploy — Render free tier + keep-alive ping
-
-No credit card needed anywhere in this path.
-
-This bot has no real web UI, but Render's free tier only offers the "Web
-Service" type for free (Background Worker requires a paid plan), and Web
-Services need something listening on a port. The bot already has a tiny
-`/health` endpoint for exactly this — it doesn't do anything else.
-
-1. **New → Web Service** on render.com → connect the `resource-faq-bot`
-   repo.
-2. Build command: `npm install`. Start command: `npm start`.
-3. Add your environment variables (`DISCORD_TOKEN`, `REVIEW_CHANNEL_ID`,
-   `MOD_ROLE_ID`, and whichever storage vars from step 6 you're using).
-4. Deploy. Check the logs for `[bot] logged in as...` and
-   `[web] health listener up on...`.
-
-**The one thing that actually matters here:** Render puts free Web
-Services to sleep after 15 minutes with no incoming HTTP requests — and
-since this bot's only HTTP traffic is that `/health` endpoint, without
-something pinging it, Render *will* sleep it, which kills the Discord
-connection along with it. Fix:
-
-5. Sign up free at **uptimerobot.com** (no card needed either).
-6. Add an HTTP(S) monitor hitting `https://your-app.onrender.com/health`
-   every 5 minutes.
-
-As long as that ping keeps running, Render never sees 15 minutes of
-inactivity and the bot stays connected indefinitely. This is a genuinely
-solid free setup for a bot this lightweight — the only real risk is if the
-monitor itself ever has a gap, which is rare but not impossible.
-
-### If you ever get access to a card
-
-A real VM (Oracle Cloud's Always Free tier, or GCP's `e2-micro` Always Free
-instance as a backup if Oracle's identity check gives you trouble) removes
-the keep-alive dependency entirely — no port, no sleep, no monitor needed,
-it just runs. Worth switching to eventually if that becomes an option,
-but it's not required — the Render setup above is a legitimate long-term
-home for this bot as-is.
-
-### Why not Vercel?
-
-Comes up a lot since it's free and popular, but it only runs serverless
-functions, not a persistent process — this bot keeps a live WebSocket to
-Discord's Gateway (for the approve/reject buttons, autocomplete, etc.), and
-serverless functions get frozen between requests, which drops that
-connection. Vercel only works for bots rebuilt around Discord's HTTP
-Interactions endpoint instead of the Gateway — a different architecture,
-not a drop-in deploy target here.
-
 ---
 
 <div align="center">
