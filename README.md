@@ -181,6 +181,16 @@ it just runs. Worth switching to eventually if that becomes an option,
 but it's not required — the Render setup above is a legitimate long-term
 home for this bot as-is.
 
+### Why not Vercel?
+
+Comes up a lot since it's free and popular, but it only runs serverless
+functions, not a persistent process — this bot keeps a live WebSocket to
+Discord's Gateway (for the approve/reject buttons, autocomplete, etc.), and
+serverless functions get frozen between requests, which drops that
+connection. Vercel only works for bots rebuilt around Discord's HTTP
+Interactions endpoint instead of the Gateway — a different architecture,
+not a drop-in deploy target here.
+
 ---
 
 <div align="center">
