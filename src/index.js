@@ -1,6 +1,6 @@
 import http from 'http';
 import { assertConfig } from './config.js';
-import { createBot } from './bot.js';
+import { createBot, isReady } from './bot.js';
 
 assertConfig();
 
@@ -13,8 +13,13 @@ assertConfig();
 const PORT = process.env.PORT || 3000;
 http
   .createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('resource-faq-bot is running');
+    if (isReady()) {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('resource-faq-bot is running');
+    } else {
+      res.writeHead(503, { 'Content-Type': 'text/plain' });
+      res.end('resource-faq-bot is starting or disconnected');
+    }
   })
   .listen(PORT, () => {
     console.log(`[web] health listener up on ${PORT} (keep-alive target for uptime monitor)`);

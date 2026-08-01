@@ -49,7 +49,9 @@ async function githubRequest(method, path, body) {
   });
   if (!res.ok && res.status !== 404) {
     const text = await res.text();
-    throw new Error(`GitHub API ${method} ${path} failed: ${res.status} ${text}`);
+    const err = new Error(`GitHub API ${method} ${path} failed: ${res.status} ${text}`);
+    err.status = res.status;
+    throw err;
   }
   return res;
 }
@@ -65,8 +67,8 @@ async function githubRead() {
   return { data: JSON.parse(decoded), sha: json.sha };
 }
 
-async function githubWrite(data) {
-  const { sha } = await githubRead(); // fetch current sha right before writing
+async function githubWrite(data, sha) {
+  if (sha === undefined) ({ sha } = await githubRead());
   const content = Buffer.from(JSON.stringify(data, null, 2)).toString('base64');
   await githubRequest('PUT', `/repos/${config.githubRepo}/contents/${config.githubPath}`, {
     message: `Update resources.json — ${new Date().toISOString()}`,
@@ -111,6 +113,42 @@ async function writeStore(store) {
   return store;
 }
 
+// Every state change funnels through here instead of calling
+// readStore/writeStore directly, so two overlapping mutations can't
+// silently clobber each other (lost-update race).
+//
+// ponytail: global in-process queue; move to a real lock/lease if this
+// ever runs as more than one process.
+let queue = Promise.resolve();
+
+async function mutate(mutator) {
+  if (githubEnabled()) return mutateOnGithub(mutator);
+  const run = queue.then(async () => {
+    const store = await readStore();
+    const result = mutator(store);
+    await writeStore(store);
+    return result;
+  });
+  queue = run.then(
+    () => {},
+    () => {}
+  ); // keep the chain alive even if this mutation rejected
+  return run;
+}
+
+async function mutateOnGithub(mutator, attemptsLeft = 5) {
+  const { data, sha } = await githubRead();
+  const store = normalizeStoreShape(data);
+  const result = mutator(store);
+  try {
+    await githubWrite(store, sha);
+    return result;
+  } catch (err) {
+    if (err.status === 409 && attemptsLeft > 1) return mutateOnGithub(mutator, attemptsLeft - 1);
+    throw err;
+  }
+}
+
 function normalizeSubject(subject) {
   // Lookup key: strip ALL whitespace so "COMP 001", "comp001", "COMP  001"
   // all collapse to the same key — spacing shouldn't fragment the index.
@@ -127,23 +165,23 @@ function displaySubject(subject) {
 }
 
 export async function addResource({ subject, title, link, hasFile, submittedBy }) {
-  const store = await readStore();
-  const entry = {
-    id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    subject: displaySubject(subject),
-    subjectKey: normalizeSubject(subject),
-    title: title.trim(),
-    link: link ? link.trim() : null,
-    hasFile: Boolean(hasFile),
-    reviewRef: null, // { guildId, channelId, messageId } — where the submission (and file, if any) first landed
-    postedRef: null, // { guildId, channelId, messageId } — the resource's permanent home once approved
-    submittedBy,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
-  store.resources.push(entry);
-  await writeStore(store);
-  return entry;
+  return mutate((store) => {
+    const entry = {
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      subject: displaySubject(subject),
+      subjectKey: normalizeSubject(subject),
+      title: title.trim(),
+      link: link ? link.trim() : null,
+      hasFile: Boolean(hasFile),
+      reviewRef: null, // { guildId, channelId, messageId } — where the submission (and file, if any) first landed
+      postedRef: null, // { guildId, channelId, messageId } — the resource's permanent home once approved
+      submittedBy,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    store.resources.push(entry);
+    return entry;
+  });
 }
 
 export async function getResource(id) {
@@ -151,42 +189,43 @@ export async function getResource(id) {
   return store.resources.find((r) => r.id === id) || null;
 }
 
-export async function setResourceStatus(id, status, reviewedBy) {
-  const store = await readStore();
-  const entry = store.resources.find((r) => r.id === id);
-  if (!entry) return null;
-  entry.status = status;
-  entry.reviewedBy = reviewedBy;
-  entry.reviewedAt = new Date().toISOString();
-  await writeStore(store);
-  return entry;
+export async function setResourceStatus(id, status, reviewedBy, { expectedStatus } = {}) {
+  return mutate((store) => {
+    const entry = store.resources.find((r) => r.id === id);
+    if (!entry) return null;
+    if (expectedStatus && entry.status !== expectedStatus) return null; // already resolved by someone else
+    entry.status = status;
+    entry.reviewedBy = reviewedBy;
+    entry.reviewedAt = new Date().toISOString();
+    return entry;
+  });
 }
 
 export async function setReviewRef(id, guildId, channelId, messageId) {
-  const store = await readStore();
-  const entry = store.resources.find((r) => r.id === id);
-  if (!entry) return null;
-  entry.reviewRef = { guildId, channelId, messageId };
-  await writeStore(store);
-  return entry;
+  return mutate((store) => {
+    const entry = store.resources.find((r) => r.id === id);
+    if (!entry) return null;
+    entry.reviewRef = { guildId, channelId, messageId };
+    return entry;
+  });
 }
 
 export async function setPostedRef(id, guildId, channelId, messageId) {
-  const store = await readStore();
-  const entry = store.resources.find((r) => r.id === id);
-  if (!entry) return null;
-  entry.postedRef = { guildId, channelId, messageId };
-  await writeStore(store);
-  return entry;
+  return mutate((store) => {
+    const entry = store.resources.find((r) => r.id === id);
+    if (!entry) return null;
+    entry.postedRef = { guildId, channelId, messageId };
+    return entry;
+  });
 }
 
 export async function removeResource(id) {
-  const store = await readStore();
-  const idx = store.resources.findIndex((r) => r.id === id);
-  if (idx === -1) return null;
-  const [removed] = store.resources.splice(idx, 1);
-  await writeStore(store);
-  return removed;
+  return mutate((store) => {
+    const idx = store.resources.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    const [removed] = store.resources.splice(idx, 1);
+    return removed;
+  });
 }
 
 export async function getApprovedBySubject(subject) {
@@ -222,11 +261,11 @@ export async function getPending() {
 // somewhere. Fully admin-adjustable at runtime via slash command — add a
 // new thread anytime and just point a subject at it, no code changes. ---
 export async function setSubjectChannel(subject, channelId) {
-  const store = await readStore();
-  const key = normalizeSubject(subject);
-  store.subjectChannels[key] = { display: displaySubject(subject), channelId };
-  await writeStore(store);
-  return store.subjectChannels[key];
+  return mutate((store) => {
+    const key = normalizeSubject(subject);
+    store.subjectChannels[key] = { display: displaySubject(subject), channelId };
+    return store.subjectChannels[key];
+  });
 }
 
 export async function getSubjectChannel(subject) {

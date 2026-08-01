@@ -33,9 +33,30 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OCEAN_BANNER_PATH = path.join(__dirname, '..', 'assets', 'ocean-banner.png');
 const OCEAN_BLUE = 0x2ab7ca;
+const CONTENT_LIMIT = 1900; // Discord hard cap is 2000
+const EMBED_DESC_LIMIT = 4000; // Discord hard cap is 4096
 
 function messageLink(ref) {
   return ref ? `https://discord.com/channels/${ref.guildId}/${ref.channelId}/${ref.messageId}` : null;
+}
+
+// Joins lines up to `limit` chars, appending a "…and N more" note instead of
+// exceeding Discord's content/embed-description caps.
+export function joinWithLimit(lines, limit, unit) {
+  let out = '';
+  let shown = 0;
+  for (const line of lines) {
+    const sep = out ? '\n' : '';
+    if (out.length + sep.length + line.length > limit) break;
+    out += sep + line;
+    shown++;
+  }
+  const remaining = lines.length - shown;
+  if (remaining > 0) {
+    const note = `\n…and ${remaining} more ${unit}${remaining === 1 ? '' : 's'}`;
+    out = out.slice(0, limit - note.length) + note;
+  }
+  return out;
 }
 
 const commands = [
@@ -141,10 +162,31 @@ function oceanPostPayload(entry, freshFileUrl) {
   return { embeds: [embed], files };
 }
 
+let ready = false;
+export function isReady() {
+  return ready;
+}
+
+async function reportInteractionError(interaction, err) {
+  console.error('[bot] unhandled error handling interaction:', err);
+  try {
+    if (interaction.isAutocomplete()) {
+      if (!interaction.responded) await interaction.respond([]);
+      return;
+    }
+    const payload = { content: 'Something went wrong — please try again.', ephemeral: true };
+    if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
+    else await interaction.reply(payload);
+  } catch (nestedErr) {
+    console.error('[bot] failed to notify user about the earlier error:', nestedErr);
+  }
+}
+
 export async function createBot() {
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
   client.once('ready', async () => {
+    ready = true;
     console.log(`[bot] logged in as ${client.user.tag}`);
     try {
       const rest = new REST().setToken(config.discordToken);
@@ -156,6 +198,18 @@ export async function createBot() {
   });
 
   client.on('interactionCreate', async (interaction) => {
+    try {
+      await handleInteraction(interaction);
+    } catch (err) {
+      await reportInteractionError(interaction, err);
+    }
+  });
+
+  await client.login(config.discordToken);
+  return client;
+}
+
+async function handleInteraction(interaction) {
     // --- autocomplete ---
     if (interaction.isAutocomplete()) {
       const focused = interaction.options.getFocused(true);
@@ -190,6 +244,10 @@ export async function createBot() {
       }
 
       if (interaction.commandName === 'resource-remove' && focused.name === 'title') {
+        if (!isModerator(interaction)) {
+          await interaction.respond([]);
+          return;
+        }
         const subject = interaction.options.getString('subject');
         if (!subject) {
           await interaction.respond([]);
@@ -267,7 +325,7 @@ export async function createBot() {
         const embed = new EmbedBuilder()
           .setColor(OCEAN_BLUE)
           .setTitle(`📘 Resources — ${subject}${search ? ` · "${search}"` : ''}`)
-          .setDescription(lines.join('\n'));
+          .setDescription(joinWithLimit(lines, EMBED_DESC_LIMIT, 'resource'));
         await interaction.reply({ embeds: [embed] });
         return;
       }
@@ -283,7 +341,7 @@ export async function createBot() {
           return;
         }
         const lines = pending.map((r) => `• **${r.subject}** — ${r.title} (submitted by ${r.submittedBy})`);
-        await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+        await interaction.reply({ content: joinWithLimit(lines, CONTENT_LIMIT, 'submission'), ephemeral: true });
         return;
       }
 
@@ -349,7 +407,7 @@ export async function createBot() {
           return;
         }
         const lines = entries.map((e) => `• **${e.display}** → <#${e.channelId}>`);
-        await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+        await interaction.reply({ content: joinWithLimit(lines, CONTENT_LIMIT, 'mapping'), ephemeral: true });
         return;
       }
     }
@@ -370,7 +428,11 @@ export async function createBot() {
       }
 
       const status = action === 'approve' ? 'approved' : 'rejected';
-      const updated = await setResourceStatus(id, status, interaction.user.tag);
+      const updated = await setResourceStatus(id, status, interaction.user.tag, { expectedStatus: 'pending' });
+      if (!updated) {
+        await interaction.reply({ content: 'Someone already reviewed this submission.', ephemeral: true });
+        return;
+      }
       let statusLine = `${status === 'approved' ? '✅ Approved' : '❌ Rejected'} by ${interaction.user.tag}`;
 
       if (status === 'approved') {
@@ -402,8 +464,4 @@ export async function createBot() {
         components: reviewButtons(updated, true),
       });
     }
-  });
-
-  await client.login(config.discordToken);
-  return client;
 }
