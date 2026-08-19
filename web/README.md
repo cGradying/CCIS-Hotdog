@@ -58,17 +58,26 @@ writes to the store, so it's safe to point at the bot's real data.
 4. Deploy. `/` is server-rendered on demand (`export const dynamic =
    'force-dynamic'`), so it always shows live data — no cache staleness.
 
-### Cloudflare Pages (via OpenNext)
+### Cloudflare Pages/Workers (via OpenNext)
+
+The `wrangler.toml` for this is already committed — it points at the OpenNext
+worker (`main = ".open-next/worker.js"`) with the adapter's static assets
+bound to `ASSETS`.
 
 ```bash
 cd web
-npx @opennextjs/cloudflare@latest init   # adds wrangler + OpenNext config
-npm run deploy                            # builds with the Cloudflare adapter
+npm install               # pulls @opennextjs/cloudflare + wrangler
+npm run preview           # local Cloudflare preview
+npm run deploy            # opennextjs-cloudflare build && wrangler deploy
 ```
 
-Set the same env vars in Cloudflare Pages → Settings → Environment variables.
+Set the same env vars in Cloudflare: non-secrets in `wrangler.toml` under
+`[vars]`, and secrets (`GITHUB_TOKEN`) with `wrangler secret put GITHUB_TOKEN`.
 The GitHub backend is recommended here (HTTP fetch only); the MongoDB driver
 works too but needs the TCP connection allowed for the Worker.
+
+If you'd rather use the Cloudflare dashboard git integration, point the build
+command at `npm run deploy` and the root directory at `web/`.
 
 ## Why not static export?
 
