@@ -120,6 +120,14 @@ npm start          # node src/index.js
 
 Expect `[bot] logged in as…` and `[web] health listener up on…`.
 
+## Website
+
+`web/` holds a read-only Next.js (App Router, plain JS + Tailwind v4) public
+view of the resource library. It imports the bot's own `store.js`, so it shows
+the same approved resources with the same normalization. Server-rendered on
+demand — no stale cache. See [`web/README.md`](web/README.md) for local dev and
+Vercel/Cloudflare deploy steps (root directory: `web`).
+
 Slash commands are re-registered globally on every `ready` via
 `REST.put(Routes.applicationCommands(...))`, so command changes take effect on
 restart with no separate deploy script.
