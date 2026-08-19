@@ -234,6 +234,11 @@ export async function getApprovedBySubject(subject) {
   return store.resources.filter((r) => r.status === 'approved' && r.subjectKey === key);
 }
 
+export async function getAllApproved() {
+  const store = await readStore();
+  return store.resources.filter((r) => r.status === 'approved');
+}
+
 export async function getAllBySubject(subject) {
   const store = await readStore();
   const key = normalizeSubject(subject);
