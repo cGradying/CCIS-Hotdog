@@ -4,19 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Discord bot: per-subject resource library with a moderated submission queue.
-Entirely slash-command driven, no web UI. Node >= 18, ESM (`"type": "module"`).
+Discord bot: per-subject resource library with a moderated submission queue,
+plus an announcement pipeline (Google Sheet → BCC email, poster, Facebook post,
+Discord announcement) and a read-only Next.js website in `web/`. Entirely
+slash-command driven. Node >= 18, ESM (`"type": "module"`).
 
 ## Commands
 
 ```bash
 npm install
-npm start          # node src/index.js
+npm start              # node src/index.js
+npm run announce       # run the announcement pipeline (email + facebook + poster)
+npm run announce:dry   # fetch emails + build poster, send nothing
+npm run self-check     # plain-node sanity checks
+cd web && npm run dev  # website
 ```
 
-No test suite, no build step, no lint config. Slash commands re-register
-globally on every `ready` event via `REST.put(Routes.applicationCommands(...))`,
-so command changes take effect on restart — no separate deploy/register script.
+No test suite, no lint config. Slash commands re-register globally on every
+`ready` event via `REST.put(Routes.applicationCommands(...))`, so command
+changes take effect on restart — no separate deploy/register script.
 
 Expect `[bot] logged in as…` and `[web] health listener up on…` on a healthy boot.
 
@@ -27,6 +33,14 @@ src/index.js   bare /health HTTP listener + boots the client
 src/bot.js     one interactionCreate handler: commands, autocomplete, buttons
 src/config.js  env → config object
 src/store.js   persistence, backend chosen at runtime
+src/announcement.js  announcement content template (email/Facebook/Discord/poster)
+src/sheets.js      Google Sheets → email list
+src/poster.js      banner + title/content overlay → poster PNG (sharp)
+src/mail.js        Gmail SMTP sender + mailto receipt writer
+src/facebook.js    Graph API Page post
+src/pipeline.js    orchestrates the announcement flow
+scripts/run-pipeline.js  one-shot CLI for the pipeline
+web/               read-only Next.js view of the same store (see web/README.md)
 ```
 
 Command handling is deliberately single-file: slash commands, autocomplete
@@ -70,11 +84,31 @@ Button custom IDs: `res_review:<approve|reject>:<resourceId>`. Permission
 checks route through `isModerator()`: `MOD_ROLE_ID` if configured, else the
 `ManageGuild` permission.
 
+### Announcement pipeline
+
+`runAnnouncementPipeline()` in `pipeline.js` runs independent, best-effort
+steps and returns a summary with `errors[]` — one failing step (e.g. Facebook
+not configured) never blocks the rest. Never let a step throw out of the
+orchestrator. Triggered via the `/announce` slash command (mods) or
+`scripts/run-pipeline.js`.
+
+Content is composed once in `announcement.js` from env vars; every output
+(email body, Facebook caption, Discord embed, poster) derives from that same
+object. Posters are composited in `poster.js` with `sharp` (SVG text overlay —
+escape all XML). Emails go out as **one message with everyone BCC'd** via
+`mail.js`; each real run writes a receipt (audit JSON + recipients CSV +
+mailto link) into `OUTPUT_DIR` (default `output/`, gitignored).
+
+**Important for the website**: `web/lib/resources.js` imports the bot's
+`store.js` directly — it must stay plain ESM with no new Node-only import
+that would break the serverless bundle. Client components may only import from
+`web/lib/format.js` (pure helpers), never from store-backed modules.
+
 ## Configuration
 
 `cp .env.example .env`. Required: `DISCORD_TOKEN`, `REVIEW_CHANNEL_ID`. See
 README for the full variable table (GitHub/Mongo backend selection, mod role,
-etc). `config.js` reads all env vars into one object; `assertConfig()` warns
-on missing values rather than exiting.
+pipeline, Facebook, etc). `config.js` reads all env vars into one object;
+`assertConfig()` warns on missing values rather than exiting.
 
-Log prefixes: `[bot]`, `[web]`, `[config]`.
+Log prefixes: `[bot]`, `[web]`, `[config]`, `[pipeline]`.
