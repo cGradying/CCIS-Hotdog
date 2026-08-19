@@ -14,6 +14,7 @@ import {
   AttachmentBuilder,
 } from 'discord.js';
 import { config } from './config.js';
+import { runAnnouncementPipeline } from './pipeline.js';
 import {
   addResource,
   getResource,
@@ -109,6 +110,16 @@ const commands = [
   new SlashCommandBuilder()
     .setName('subject-channel-list')
     .setDescription('(Mods) List all subject → channel/thread mappings'),
+
+  new SlashCommandBuilder()
+    .setName('announce')
+    .setDescription('(Mods) Run the announcement pipeline: emails + Facebook post + channel announcement')
+    .addBooleanOption((o) =>
+      o
+        .setName('dry-run')
+        .setDescription('Fetch emails and build the poster, but send/post nothing')
+        .setRequired(false)
+    ),
 ].map((c) => c.toJSON());
 
 function isModerator(interaction) {
@@ -408,6 +419,70 @@ async function handleInteraction(interaction) {
         }
         const lines = entries.map((e) => `• **${e.display}** → <#${e.channelId}>`);
         await interaction.reply({ content: joinWithLimit(lines, CONTENT_LIMIT, 'mapping'), ephemeral: true });
+        return;
+      }
+
+      if (interaction.commandName === 'announce') {
+        if (!isModerator(interaction)) {
+          await interaction.reply({ content: "You don't have permission to run announcements.", ephemeral: true });
+          return;
+        }
+        const dryRun = interaction.options.getBoolean('dry-run') ?? false;
+        await interaction.deferReply({ ephemeral: true });
+
+        let results;
+        try {
+          results = await runAnnouncementPipeline({ dryRun });
+        } catch (err) {
+          console.error('[bot] announcement pipeline crashed:', err);
+          await interaction.followUp({ content: `❌ Announcement pipeline crashed: ${err.message}`, ephemeral: true });
+          return;
+        }
+
+        if (!dryRun && config.announcementChannelId) {
+          try {
+            const channel = await interaction.client.channels.fetch(config.announcementChannelId);
+            const embed = new EmbedBuilder()
+              .setColor(OCEAN_BLUE)
+              .setTitle(`📣 ${results.announcement.title}`)
+              .setDescription(results.announcement.discordDescription)
+              .setFooter({ text: 'Announced via pipeline' });
+            const payload = { embeds: [embed] };
+            if (results.posterPath) payload.files = [new AttachmentBuilder(results.posterPath, { name: 'poster.png' })];
+            await channel.send(payload);
+          } catch (err) {
+            console.error('[bot] failed to post announcement to channel:', err);
+          }
+        }
+
+        const lines = [
+          `**Announcement pipeline complete**${dryRun ? ' (dry run — nothing sent)' : ''}`,
+          `👥 Recipients loaded: ${results.recipients.length}`,
+          `🖼️ Poster: ${results.posterPath ? 'generated' : 'skipped'}`,
+          `📧 Email: ${
+            results.email
+              ? `sent (${results.email.messageId || 'ok'})`
+              : dryRun
+                ? 'not sent (dry run)'
+                : results.recipients.length
+                  ? 'not sent — check GMAIL_USER/GMAIL_APP_PASSWORD'
+                  : 'not sent — no recipients'
+          }`,
+          `📘 Facebook: ${
+            results.facebook
+              ? results.facebook.skipped
+                ? 'skipped (not configured)'
+                : `posted (${results.facebook.postId || results.facebook.id})`
+              : dryRun
+                ? 'not posted (dry run)'
+                : 'not configured'
+          }`,
+          `🔗 Mailto receipt: ${results.mailtoUri ? 'generated (saved to output/)' : 'none'}`,
+        ];
+        if (results.errors.length) {
+          lines.push(`⚠️ ${results.errors.length} step(s) reported errors — see logs.`);
+        }
+        await interaction.followUp({ content: lines.join('\n'), ephemeral: true });
         return;
       }
     }

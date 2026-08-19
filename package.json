@@ -6,7 +6,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "self-check": "node scripts/self-check.js"
+    "self-check": "node scripts/self-check.js",
+    "announce": "node scripts/run-pipeline.js",
+    "announce:dry": "node scripts/run-pipeline.js --dry-run"
   },
   "engines": {
     "node": ">=18"
@@ -14,6 +16,8 @@
   "dependencies": {
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "mongodb": "^6.10.0"
+    "mongodb": "^6.10.0",
+    "nodemailer": "^9.0.5",
+    "sharp": "^0.35.3"
   }
 }
