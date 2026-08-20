@@ -27,6 +27,9 @@ export default function RootLayout({ children }) {
               <Link href="/#subjects" className="text-slate-300 transition-colors hover:text-ocean-300">
                 Subjects
               </Link>
+              <Link href="/studio" className="text-slate-300 transition-colors hover:text-ocean-300">
+                Announce
+              </Link>
               <Link
                 href={INVITE_URL || '#'}
                 className="rounded-full bg-ocean-500 px-4 py-1.5 font-semibold text-navy-950 transition-colors hover:bg-ocean-400"

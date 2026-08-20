@@ -8,7 +8,16 @@ compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 assets = { binding = "ASSETS", directory = ".open-next/assets" }
 
-# Non-secret build-time vars for the site. Secrets (GITHUB_TOKEN) go through
-# `wrangler secret put GITHUB_TOKEN` — never commit them here.
-# [vars]
+# Non-secret build-time vars for the site. Secrets go through `wrangler secret put`
+# — never commit them here. The /api/announce route reads these at runtime.
+[vars]
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/122iG-rM70WP2F5qV4pvPcJXw5oh9AKbrUbX6amDh-Fk/export?format=csv&gid=2063119424"
+SHEET_EMAIL_COLUMN = "Email"
+FACEBOOK_PAGE_ID = "1273013575893725"
+ANNOUNCEMENT_CHANNEL_ID = "1523370533666816080"
+
+# Runtime secrets — set with `wrangler secret put`:
+#   GITHUB_TOKEN                  data store auth (resources from repo)
+#   FACEBOOK_PAGE_ACCESS_TOKEN    page token to post announcements
+#   DISCORD_TOKEN                 bot token for the Discord announcement
 # NEXT_PUBLIC_DISCORD_INVITE = "https://discord.gg/your-invite"
