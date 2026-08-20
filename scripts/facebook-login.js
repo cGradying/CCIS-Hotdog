@@ -23,8 +23,8 @@ const AUTH = 'https://www.facebook.com/v26.0/dialog/oauth';
 const TOKEN = 'https://graph.facebook.com/v26.0/oauth/access_token';
 const GRAPH = 'https://graph.facebook.com/v26.0';
 const PORT = 8977;
-const REDIRECT = `http://127.0.0.1:${PORT}/callback`;
-const SCOPES = 'pages_show_list,pages_manage_posts';
+const REDIRECT = `http://localhost:${PORT}/callback`;
+const SCOPES = 'pages_show_list,pages_manage_posts,pages_read_engagement';
 
 function openBrowser(url) {
   const cmd = process.platform === 'win32' ? `cmd /c start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
@@ -95,6 +95,7 @@ if (token.error) throw new Error(`token error: ${token.error} ${token.error_desc
 
 const userToken = token.access_token;
 console.log('[facebook-login] got user access token');
+if (!token.refresh_token) console.log('[facebook-login] WARNING: no refresh_token in response:', JSON.stringify(token).slice(0, 200));
 
 const accounts = await graph('/me/accounts', userToken);
 if (accounts.error) throw new Error(`/me/accounts failed: ${accounts.error.message}`);
@@ -108,6 +109,7 @@ fs.writeFileSync(
   JSON.stringify(
     {
       client_id: APP_ID,
+      refresh_token: token.refresh_token || null,
       user_access_token: userToken,
       page: { id: page.id, name: page.name, access_token: page.access_token },
       obtainedAt: new Date().toISOString(),
@@ -119,3 +121,19 @@ fs.writeFileSync(
 console.log('[facebook-login] token saved to', TOKEN_FILE);
 console.log('[facebook-login] page:', page.name, `(id ${page.id})`);
 console.log('[facebook-login] found pages:', accounts.data.map((p) => `${p.name} (${p.id})`).join(', '));
+
+// Keep the pipeline's .env in sync with the fresh page token.
+const ENV_FILE = path.join(__dirname, '..', '.env');
+if (fs.existsSync(ENV_FILE)) {
+  let env = fs.readFileSync(ENV_FILE, 'utf8');
+  const setOrAdd = (key, value) => {
+    const re = new RegExp(`^${key}=.*$`, 'm');
+    return re.test(env) ? env.replace(re, `${key}=${value}`) : `${env.replace(/\s*$/, '')}\n${key}=${value}\n`;
+  };
+  env = setOrAdd('FACEBOOK_PAGE_ID', page.id);
+  env = setOrAdd('FACEBOOK_PAGE_ACCESS_TOKEN', page.access_token);
+  fs.writeFileSync(ENV_FILE, env);
+  console.log('[facebook-login] .env updated with fresh page token');
+} else {
+  console.log('[facebook-login] .env not found — skipped');
+}

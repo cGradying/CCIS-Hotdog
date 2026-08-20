@@ -2,3 +2,13 @@ name = "bscs1nres-fb-oauth"
 main = "src/index.js"
 compatibility_date = "2026-08-20"
 workers_dev = true
+
+# Cron: refresh the Facebook token every 20 days.
+# Cloudflare cron syntax uses 5 fields (no seconds). We trigger on the 1st and
+# 21st of each month, and the worker only refreshes when 20+ days have passed
+# since the last refresh, so this fires roughly every 20 days.
+triggers = { crons = ["0 0 1,21 * *"] }
+
+[[kv_namespaces]]
+binding = "FB_KV"
+id = "621a2cb5bf6d43fcab9981401ecd3f5c"
