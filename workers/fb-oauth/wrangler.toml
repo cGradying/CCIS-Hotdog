@@ -1,0 +1,4 @@
+name = "bscs1nres-fb-oauth"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+workers_dev = true

@@ -57,6 +57,10 @@ export default function RootLayout({ children }) {
               >
                 class Discord server
               </a>
+              {' · '}
+              <Link href="/studio" className="text-ocean-400 hover:text-ocean-300">
+                Announcement Studio
+              </Link>
             </p>
           </div>
         </footer>
